@@ -364,7 +364,7 @@ class GenericVariationalAutoEncoder(
 
     def __init__(self, n_inpt, n_latent,
                  assumptions, gen_class, rec_class, condition_func=None,
-                 use_imp_weight=False,
+                 use_imp_weight=False, hack=False,
                  batch_size=None, optimizer='rprop',
                  max_iter=1000, verbose=False):
         """Create a VariationalAutoEncoder object.
@@ -426,6 +426,7 @@ class GenericVariationalAutoEncoder(
         self.condition_func = condition_func
 
         self.use_imp_weight = use_imp_weight
+        self.hack = hack
         self.batch_size = batch_size
         self.optimizer = optimizer
         self.max_iter = max_iter
@@ -467,15 +468,22 @@ class GenericVariationalAutoEncoder(
                                            declare=parameters.declare)
 
         if self.use_imp_weight:
-            imp_weight = T.addbroadcast(self.imp_weight, n_dim - 1)
+            if self.hack:
+                print "WARNING: Importance weights are given in a " \
+                      "coordinate-wise way. This has implications " \
+                      "for the mathematical validity of the loss. " \
+                      "You are doing this at your own risk."
+                imp_weight = self.imp_weight
+            else:
+                imp_weight = T.addbroadcast(self.imp_weight, n_dim - 1)
         else:
             imp_weight = False
 
-        rec_loss = supervised_loss(
+        rec_loss_coord_wise = supervised_loss(
             inpt, self.vae.output, self.assumptions.nll_gen_model,
             coord_axis=n_dim - 1,
             imp_weight=imp_weight)['loss_coord_wise']
-        self.rec_loss_sample_wise = rec_loss.sum(axis=n_dim - 1)
+        self.rec_loss_sample_wise = rec_loss_coord_wise.sum(axis=n_dim - 1)
         self.rec_loss = self.rec_loss_sample_wise.mean()
 
         output = self.vae.gen.output
@@ -486,9 +494,12 @@ class GenericVariationalAutoEncoder(
         n_dim = inpt.ndim
         self.kl_coord_wise = self.assumptions.kl_recog_prior(self.vae.latent)
 
-        if self.use_imp_weight:
-            self.kl_coord_wise *= imp_weight
         self.kl_sample_wise = self.kl_coord_wise.sum(axis=n_dim - 1)
+        imp_weight_sample_wise = imp_weight.mean(axis=n_dim - 1)
+
+        if self.use_imp_weight:
+            self.kl_sample_wise *= imp_weight_sample_wise
+
         self.kl = self.kl_sample_wise.mean()
 
         self.loss_sample_wise = self.kl_sample_wise + self.rec_loss_sample_wise
@@ -659,6 +670,7 @@ class StochasticRnn(GenericVariationalAutoEncoder):
                  p_dropout_hidden_to_out=None,
                  p_dropout_shortcut=None,
                  use_imp_weight=False,
+                 hack=False,
                  batch_size=None, optimizer='rprop',
                  max_iter=1000, verbose=False):
 
@@ -682,7 +694,7 @@ class StochasticRnn(GenericVariationalAutoEncoder):
 
         GenericVariationalAutoEncoder.__init__(self, n_inpt, n_latent,
             assumptions, self._make_recog, self._make_gen, self._make_condition,
-            use_imp_weight=use_imp_weight,
+            use_imp_weight=use_imp_weight, hack=hack,
             batch_size=batch_size, optimizer=optimizer,
             max_iter=verbose, verbose=verbose)
 
